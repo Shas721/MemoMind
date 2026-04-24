@@ -1,20 +1,17 @@
-
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 }
 
-serve(async (req) => {
-  // Handle CORS preflight requests
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
-    // ============ AUTHORIZATION CHECK ============
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(
@@ -23,7 +20,6 @@ serve(async (req) => {
       )
     }
 
-    // Verify user identity using their JWT
     const supabaseAuth = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -40,19 +36,16 @@ serve(async (req) => {
     }
 
     console.log('Authenticated user:', user.id)
-    // ============ END AUTHORIZATION CHECK ============
 
     const { session_id, message } = await req.json();
-    
-    // Use the verified user ID, not the one from the request body (security!)
+
     const user_id = user.id;
-    
+
     console.log('Received message:', { session_id, message, user_id });
 
-    // Get the webhook URL and auth header from environment
     const webhookUrl = Deno.env.get('NOTEBOOK_CHAT_URL');
     const webhookAuthHeader = Deno.env.get('NOTEBOOK_GENERATION_AUTH');
-    
+
     if (!webhookUrl) {
       throw new Error('NOTEBOOK_CHAT_URL environment variable not set');
     }
@@ -63,7 +56,6 @@ serve(async (req) => {
 
     console.log('Sending to webhook with auth header');
 
-    // Send message to n8n webhook with authentication
     const webhookResponse = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
@@ -90,29 +82,28 @@ serve(async (req) => {
 
     return new Response(
       JSON.stringify({ success: true, data: webhookData }),
-      { 
-        headers: { 
+      {
+        headers: {
           ...corsHeaders,
-          'Content-Type': 'application/json' 
-        } 
+          'Content-Type': 'application/json'
+        }
       }
     );
 
   } catch (error) {
     console.error('Error in send-chat-message:', error);
-    
+
     return new Response(
-      JSON.stringify({ 
-        error: error.message || 'Failed to send message to webhook' 
+      JSON.stringify({
+        error: error.message || 'Failed to send message to webhook'
       }),
-      { 
+      {
         status: 500,
-        headers: { 
+        headers: {
           ...corsHeaders,
-          'Content-Type': 'application/json' 
+          'Content-Type': 'application/json'
         }
       }
     );
   }
 });
-

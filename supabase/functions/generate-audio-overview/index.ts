@@ -1,19 +1,17 @@
-
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response(null, { status: 200, headers: corsHeaders })
   }
 
   try {
-    // ============ AUTHORIZATION CHECK ============
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(
@@ -24,7 +22,6 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
 
-    // Verify user identity using their JWT
     const supabaseAuth = createClient(
       supabaseUrl,
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -41,10 +38,9 @@ serve(async (req) => {
     }
 
     console.log('Authenticated user:', user.id)
-    // ============ END AUTHORIZATION CHECK ============
 
     const { notebookId } = await req.json()
-    
+
     if (!notebookId) {
       return new Response(
         JSON.stringify({ error: 'Notebook ID is required' }),
@@ -55,7 +51,6 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    // Verify the user owns this notebook
     const { data: notebook, error: notebookError } = await supabase
       .from('notebooks')
       .select('id, user_id')
@@ -78,7 +73,6 @@ serve(async (req) => {
       )
     }
 
-    // Update notebook status to indicate audio generation has started
     const { error: updateError } = await supabase
       .from('notebooks')
       .update({
@@ -91,7 +85,6 @@ serve(async (req) => {
       throw updateError
     }
 
-    // Get audio generation webhook URL and auth from secrets
     const audioGenerationWebhookUrl = Deno.env.get('AUDIO_GENERATION_WEBHOOK_URL')
     const webhookAuthHeader = Deno.env.get('NOTEBOOK_GENERATION_AUTH')
 
@@ -105,11 +98,9 @@ serve(async (req) => {
 
     console.log('Starting audio overview generation for notebook:', notebookId)
 
-    // Start the background task without awaiting
     EdgeRuntime.waitUntil(
       (async () => {
         try {
-          // Call the external audio generation webhook
           const audioResponse = await fetch(audioGenerationWebhookUrl, {
             method: 'POST',
             headers: {
@@ -125,8 +116,7 @@ serve(async (req) => {
           if (!audioResponse.ok) {
             const errorText = await audioResponse.text()
             console.error('Audio generation webhook failed:', errorText)
-            
-            // Update status to failed
+
             await supabase
               .from('notebooks')
               .update({ audio_overview_generation_status: 'failed' })
@@ -136,8 +126,7 @@ serve(async (req) => {
           }
         } catch (error) {
           console.error('Background audio generation error:', error)
-          
-          // Update status to failed
+
           await supabase
             .from('notebooks')
             .update({ audio_overview_generation_status: 'failed' })
@@ -146,28 +135,27 @@ serve(async (req) => {
       })()
     )
 
-    // Return immediately with success status
     return new Response(
       JSON.stringify({
         success: true,
         message: 'Audio generation started',
         status: 'generating'
       }),
-      { 
-        status: 200, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     )
 
   } catch (error) {
     console.error('Error in generate-audio-overview:', error)
     return new Response(
-      JSON.stringify({ 
-        error: error.message || 'Failed to start audio generation' 
+      JSON.stringify({
+        error: error.message || 'Failed to start audio generation'
       }),
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     )
   }

@@ -1,23 +1,19 @@
-
-import "https://deno.land/x/xhr@0.1.0/mod.ts";
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 
 const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
-serve(async (req) => {
-  // Handle CORS preflight requests
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
-    // ============ AUTHORIZATION CHECK ============
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(
@@ -26,7 +22,6 @@ serve(async (req) => {
       )
     }
 
-    // Verify user identity using their JWT
     const supabaseAuth = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -43,26 +38,23 @@ serve(async (req) => {
     }
 
     console.log('Authenticated user:', user.id)
-    // ============ END AUTHORIZATION CHECK ============
 
     const { content } = await req.json();
 
     if (!content) {
       return new Response(
-        JSON.stringify({ error: 'Content is required' }), 
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        JSON.stringify({ error: 'Content is required' }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       );
     }
 
-    // Parse content if it's a structured AI response
     let textContent = content;
     try {
       const parsed = JSON.parse(content);
       if (parsed.segments && parsed.segments.length > 0) {
-        // Extract text from first few segments
         textContent = parsed.segments
           .slice(0, 3)
           .map((segment: any) => segment.text)
@@ -72,7 +64,6 @@ serve(async (req) => {
       // Content is already plain text
     }
 
-    // Truncate content to avoid token limits
     const truncatedContent = textContent.substring(0, 1000);
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -84,13 +75,13 @@ serve(async (req) => {
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [
-          { 
-            role: 'system', 
-            content: 'You are a helpful assistant that generates concise, descriptive titles. Generate a title that is exactly 5 words or fewer, capturing the main topic or theme of the content. Return only the title, nothing else.' 
+          {
+            role: 'system',
+            content: 'You are a helpful assistant that generates concise, descriptive titles. Generate a title that is exactly 5 words or fewer, capturing the main topic or theme of the content. Return only the title, nothing else.'
           },
-          { 
-            role: 'user', 
-            content: `Generate a 5-word title for this content: ${truncatedContent}` 
+          {
+            role: 'user',
+            content: `Generate a 5-word title for this content: ${truncatedContent}`
           }
         ],
         max_tokens: 20,
@@ -108,7 +99,7 @@ serve(async (req) => {
     console.log('Generated title:', generatedTitle);
 
     return new Response(
-      JSON.stringify({ title: generatedTitle }), 
+      JSON.stringify({ title: generatedTitle }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
@@ -116,7 +107,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error in generate-note-title function:', error);
     return new Response(
-      JSON.stringify({ error: error.message }), 
+      JSON.stringify({ error: error.message }),
       {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

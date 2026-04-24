@@ -1,19 +1,17 @@
-
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response(null, { status: 200, headers: corsHeaders })
   }
 
   try {
-    // ============ AUTHORIZATION CHECK ============
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(
@@ -22,7 +20,6 @@ serve(async (req) => {
       )
     }
 
-    // Verify user identity using their JWT
     const supabaseAuth = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -39,7 +36,6 @@ serve(async (req) => {
     }
 
     console.log('Authenticated user:', user.id)
-    // ============ END AUTHORIZATION CHECK ============
 
     const { notebookId, filePath, sourceType } = await req.json()
 
@@ -50,13 +46,11 @@ serve(async (req) => {
       )
     }
 
-    // Initialize Supabase client with service role for database operations
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // Verify the user owns this notebook
     const { data: notebook, error: notebookError } = await supabaseClient
       .from('notebooks')
       .select('id, user_id')
@@ -81,7 +75,6 @@ serve(async (req) => {
 
     console.log('Processing request:', { notebookId, filePath, sourceType, userId: user.id });
 
-    // Get environment variables
     const webServiceUrl = Deno.env.get('NOTEBOOK_GENERATION_URL')
     const webhookAuthHeader = Deno.env.get('NOTEBOOK_GENERATION_AUTH')
 
@@ -90,14 +83,13 @@ serve(async (req) => {
         hasUrl: !!webServiceUrl,
         hasAuth: !!webhookAuthHeader
       })
-      
+
       return new Response(
         JSON.stringify({ error: 'Web service configuration missing' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Update notebook status to 'generating'
     await supabaseClient
       .from('notebooks')
       .update({ generation_status: 'generating' })
@@ -105,30 +97,26 @@ serve(async (req) => {
 
     console.log('Calling external web service...')
 
-    // Prepare payload based on source type
     let payload: any = {
       sourceType: sourceType
     };
 
     if (filePath) {
-      // For file sources (PDF, audio) or URLs (website, YouTube)
       payload.filePath = filePath;
     } else {
-      // For text sources, we need to get the content from the database
       const { data: source } = await supabaseClient
         .from('sources')
         .select('content')
         .eq('notebook_id', notebookId)
         .single();
-      
+
       if (source?.content) {
-        payload.content = source.content.substring(0, 5000); // Limit content size
+        payload.content = source.content.substring(0, 5000);
       }
     }
 
     console.log('Sending payload to web service:', payload);
 
-    // Call external web service
     const response = await fetch(webServiceUrl, {
       method: 'POST',
       headers: {
@@ -142,8 +130,7 @@ serve(async (req) => {
       console.error('Web service error:', response.status, response.statusText)
       const errorText = await response.text();
       console.error('Error response:', errorText);
-      
-      // Update status to failed
+
       await supabaseClient
         .from('notebooks')
         .update({ generation_status: 'failed' })
@@ -158,9 +145,8 @@ serve(async (req) => {
     const generatedData = await response.json()
     console.log('Generated data:', generatedData)
 
-    // Parse the response format: object with output property
     let title, description, notebookIcon, backgroundColor, exampleQuestions;
-    
+
     if (generatedData && generatedData.output) {
       const output = generatedData.output;
       title = output.title;
@@ -170,7 +156,7 @@ serve(async (req) => {
       exampleQuestions = output.example_questions || [];
     } else {
       console.error('Unexpected response format:', generatedData)
-      
+
       await supabaseClient
         .from('notebooks')
         .update({ generation_status: 'failed' })
@@ -184,7 +170,7 @@ serve(async (req) => {
 
     if (!title) {
       console.error('No title returned from web service')
-      
+
       await supabaseClient
         .from('notebooks')
         .update({ generation_status: 'failed' })
@@ -196,7 +182,6 @@ serve(async (req) => {
       )
     }
 
-    // Update notebook with generated content including icon, color, and example questions
     const { error: updateError } = await supabaseClient
       .from('notebooks')
       .update({
@@ -220,14 +205,14 @@ serve(async (req) => {
     console.log('Successfully updated notebook with example questions:', exampleQuestions)
 
     return new Response(
-      JSON.stringify({ 
-        success: true, 
-        title, 
+      JSON.stringify({
+        success: true,
+        title,
         description,
         icon: notebookIcon,
         color: backgroundColor,
         exampleQuestions,
-        message: 'Notebook content generated successfully' 
+        message: 'Notebook content generated successfully'
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

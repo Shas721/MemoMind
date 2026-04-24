@@ -1,20 +1,17 @@
-
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 }
 
-serve(async (req) => {
-  // Handle CORS preflight requests
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response(null, { status: 200, headers: corsHeaders })
   }
 
   try {
-    // ============ AUTHORIZATION CHECK ============
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(
@@ -23,7 +20,6 @@ serve(async (req) => {
       )
     }
 
-    // Verify user identity using their JWT
     const supabaseAuth = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -40,7 +36,6 @@ serve(async (req) => {
     }
 
     console.log('Authenticated user:', user.id)
-    // ============ END AUTHORIZATION CHECK ============
 
     const { notebookId } = await req.json()
 
@@ -48,13 +43,11 @@ serve(async (req) => {
       throw new Error('Notebook ID is required')
     }
 
-    // Initialize Supabase client
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // Get the current notebook and verify ownership
     const { data: notebook, error: fetchError } = await supabase
       .from('notebooks')
       .select('audio_overview_url, user_id')
@@ -66,7 +59,6 @@ serve(async (req) => {
       throw new Error('Failed to fetch notebook')
     }
 
-    // Verify the user owns this notebook
     if (notebook.user_id !== user.id) {
       console.error('User does not own this notebook:', { userId: user.id, ownerId: notebook.user_id })
       return new Response(
@@ -79,35 +71,29 @@ serve(async (req) => {
       throw new Error('No audio overview URL found')
     }
 
-    // Extract the file path from the existing URL
-    // Assuming the URL format is similar to: .../storage/v1/object/sign/bucket/path
     const urlParts = notebook.audio_overview_url.split('/')
     const bucketIndex = urlParts.findIndex(part => part === 'audio')
-    
+
     if (bucketIndex === -1) {
       throw new Error('Invalid audio URL format')
     }
 
-    // Reconstruct the file path from the URL
     const filePath = urlParts.slice(bucketIndex + 1).join('/')
 
     console.log('Refreshing signed URL for path:', filePath)
 
-    // Generate a new signed URL with 24 hours expiration
     const { data: signedUrlData, error: signError } = await supabase.storage
       .from('audio')
-      .createSignedUrl(filePath, 86400) // 24 hours in seconds
+      .createSignedUrl(filePath, 86400)
 
     if (signError) {
       console.error('Error creating signed URL:', signError)
       throw new Error('Failed to create signed URL')
     }
 
-    // Calculate new expiry time (24 hours from now)
     const newExpiryTime = new Date()
     newExpiryTime.setHours(newExpiryTime.getHours() + 24)
 
-    // Update the notebook with the new signed URL and expiry time
     const { error: updateError } = await supabase
       .from('notebooks')
       .update({
@@ -124,7 +110,7 @@ serve(async (req) => {
     console.log('Successfully refreshed audio URL for notebook:', notebookId)
 
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         success: true,
         audioUrl: signedUrlData.signedUrl,
         expiresAt: newExpiryTime.toISOString()
@@ -137,7 +123,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error in refresh-audio-url function:', error)
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         error: error.message || 'Failed to refresh audio URL'
       }),
       {

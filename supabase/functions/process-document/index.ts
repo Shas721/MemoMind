@@ -1,20 +1,17 @@
-
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response(null, { status: 200, headers: corsHeaders })
   }
 
   try {
-    // ============ AUTHORIZATION CHECK ============
-    // Get the JWT from the Authorization header
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(
@@ -23,7 +20,6 @@ serve(async (req) => {
       )
     }
 
-    // Create a Supabase client with the user's JWT to verify identity
     const supabaseAuth = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -34,7 +30,6 @@ serve(async (req) => {
       }
     )
 
-    // Verify the user is authenticated
     const { data: { user }, error: userError } = await supabaseAuth.auth.getUser()
     if (userError || !user) {
       console.error('Auth error:', userError)
@@ -45,7 +40,6 @@ serve(async (req) => {
     }
 
     console.log('Authenticated user:', user.id)
-    // ============ END AUTHORIZATION CHECK ============
 
     const { sourceId, filePath, sourceType } = await req.json()
 
@@ -56,7 +50,6 @@ serve(async (req) => {
       )
     }
 
-    // Verify the user owns this source
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -76,7 +69,6 @@ serve(async (req) => {
       )
     }
 
-    // Check that the user owns the notebook this source belongs to
     if (source.notebooks.user_id !== user.id) {
       console.error('User does not own this source:', { userId: user.id, ownerId: source.notebooks.user_id })
       return new Response(
@@ -87,14 +79,12 @@ serve(async (req) => {
 
     console.log('Processing document:', { source_id: sourceId, file_path: filePath, source_type: sourceType, user_id: user.id });
 
-    // Get environment variables
     const webhookUrl = Deno.env.get('DOCUMENT_PROCESSING_WEBHOOK_URL')
     const webhookAuthHeader = Deno.env.get('NOTEBOOK_GENERATION_AUTH')
 
     if (!webhookUrl) {
       console.error('Missing DOCUMENT_PROCESSING_WEBHOOK_URL environment variable')
 
-      // Update source status to failed
       await supabaseClient
         .from('sources')
         .update({ processing_status: 'failed' })
@@ -108,10 +98,8 @@ serve(async (req) => {
 
     console.log('Calling external webhook:', webhookUrl);
 
-    // Create the file URL for public access
     const fileUrl = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/sources/${filePath}`
 
-    // Prepare the payload for the webhook with correct variable names
     const payload = {
       source_id: sourceId,
       file_url: fileUrl,
@@ -122,7 +110,6 @@ serve(async (req) => {
 
     console.log('Webhook payload:', payload);
 
-    // Call external webhook with proper headers
     const webhookHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
     }
@@ -141,7 +128,6 @@ serve(async (req) => {
       const errorText = await response.text();
       console.error('Webhook call failed:', response.status, errorText);
 
-      // Update source status to failed
       await supabaseClient
         .from('sources')
         .update({ processing_status: 'failed' })

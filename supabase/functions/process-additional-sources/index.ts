@@ -1,20 +1,17 @@
-
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 }
 
-serve(async (req) => {
-  // Handle CORS preflight requests
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   try {
-    // ============ AUTHORIZATION CHECK ============
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(
@@ -23,7 +20,6 @@ serve(async (req) => {
       )
     }
 
-    // Verify user identity using their JWT
     const supabaseAuth = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -40,11 +36,9 @@ serve(async (req) => {
     }
 
     console.log('Authenticated user:', user.id)
-    // ============ END AUTHORIZATION CHECK ============
 
     const { type, notebookId, urls, title, content, timestamp, sourceIds } = await req.json();
-    
-    // Verify the user owns this notebook
+
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -74,27 +68,24 @@ serve(async (req) => {
 
     console.log(`Process additional sources received ${type} request for notebook ${notebookId} by user ${user.id}`);
 
-    // Get the webhook URL from Supabase secrets
     const webhookUrl = Deno.env.get('ADDITIONAL_SOURCES_WEBHOOK_URL');
     if (!webhookUrl) {
       throw new Error('ADDITIONAL_SOURCES_WEBHOOK_URL not configured');
     }
 
-    // Get the auth token from Supabase secrets (same as generate-notebook-content)
     const authToken = Deno.env.get('NOTEBOOK_GENERATION_AUTH');
     if (!authToken) {
       throw new Error('NOTEBOOK_GENERATION_AUTH not configured');
     }
 
-    // Prepare the webhook payload
     let webhookPayload;
-    
+
     if (type === 'multiple-websites') {
       webhookPayload = {
         type: 'multiple-websites',
         notebookId,
         urls,
-        sourceIds, // Array of source IDs corresponding to the URLs
+        sourceIds,
         timestamp
       };
     } else if (type === 'copied-text') {
@@ -103,7 +94,7 @@ serve(async (req) => {
         notebookId,
         title,
         content,
-        sourceId: sourceIds?.[0], // Single source ID for copied text
+        sourceId: sourceIds?.[0],
         timestamp
       };
     } else {
@@ -112,13 +103,11 @@ serve(async (req) => {
 
     console.log('Sending webhook payload:', JSON.stringify(webhookPayload, null, 2));
 
-    // Send to webhook with authentication
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': authToken,
-        ...corsHeaders
       },
       body: JSON.stringify(webhookPayload)
     });
@@ -132,28 +121,28 @@ serve(async (req) => {
     const webhookResponse = await response.text();
     console.log('Webhook response:', webhookResponse);
 
-    return new Response(JSON.stringify({ 
-      success: true, 
+    return new Response(JSON.stringify({
+      success: true,
       message: `${type} data sent to webhook successfully`,
-      webhookResponse 
+      webhookResponse
     }), {
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
-        ...corsHeaders 
+        ...corsHeaders
       },
     });
 
   } catch (error) {
     console.error('Process additional sources error:', error);
-    
-    return new Response(JSON.stringify({ 
+
+    return new Response(JSON.stringify({
       error: error.message,
-      success: false 
+      success: false
     }), {
       status: 500,
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
-        ...corsHeaders 
+        ...corsHeaders
       },
     });
   }
